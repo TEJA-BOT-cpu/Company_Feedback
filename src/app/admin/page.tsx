@@ -19,32 +19,20 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  // ==========================================
+  // LOAD COMPANIES
+  // ==========================================
+
   useEffect(() => {
     async function loadCompanies() {
       try {
-        // Check logged-in user
-        const storedUser = localStorage.getItem("user");
+        setError("");
 
-        if (!storedUser) {
-          router.push("/login");
-          return;
-        }
-
-        const user = JSON.parse(storedUser);
-
-        // Only ADMIN can access this page
-        if (user.role !== "ADMIN") {
-          router.push("/");
-          return;
-        }
-
-        // Get companies
         const data = await getCompanies();
 
         setCompanies(data);
-
       } catch (error) {
-        console.error(error);
+        console.error("Failed to load companies:", error);
         setError("Unable to load companies.");
       } finally {
         setLoading(false);
@@ -52,20 +40,7 @@ export default function AdminPage() {
     }
 
     loadCompanies();
-  }, [router]);
-
-
-  // ==========================================
-  // LOGOUT
-  // ==========================================
-
-  function handleLogout() {
-    localStorage.removeItem("auth");
-    localStorage.removeItem("user");
-
-    router.push("/login");
-  }
-
+  }, []);
 
   // ==========================================
   // DELETE COMPANY
@@ -75,17 +50,31 @@ export default function AdminPage() {
     companyId: number,
     companyName: string
   ) {
-
     const confirmed = window.confirm(
       `Are you sure you want to delete "${companyName}"?\n\n` +
-      "This will permanently delete:\n" +
-      "• Company information\n" +
-      "• Locations\n" +
-      "• Ownership records\n" +
-      "• Financial records\n" +
-      "• Persons\n" +
-      "• Social links\n\n" +
-      "This action cannot be undone."
+        "This will permanently delete all company data, including:\n\n" +
+        "• Company information\n" +
+        "• Locations\n" +
+        "• Ownership records\n" +
+        "• Financial records\n" +
+        "• Persons\n" +
+        "• Social links\n" +
+        "• Campus hiring events\n" +
+        "• Job roles\n" +
+        "• Compensation\n" +
+        "• Eligibility criteria\n" +
+        "• Eligible branches\n" +
+        "• Selection rounds\n" +
+        "• Job locations\n" +
+        "• Internship details\n" +
+        "• Role vacancies\n" +
+        "• Role skills\n" +
+        "• Application requirements\n" +
+        "• Role bonds\n" +
+        "• Hiring documents\n" +
+        "• Hiring timelines\n" +
+        "• Data sources\n\n" +
+        "This action cannot be undone."
     );
 
     if (!confirmed) {
@@ -93,41 +82,28 @@ export default function AdminPage() {
     }
 
     try {
-
       setError("");
       setDeletingId(companyId);
 
-      // Delete company from database
-      // Backend also deletes all related data
       await deleteCompany(companyId);
 
-      // Remove company from UI
       setCompanies((currentCompanies) =>
         currentCompanies.filter(
           (company) => company.id !== companyId
         )
       );
-
     } catch (error) {
-
-      console.error(
-        "Failed to delete company:",
-        error
-      );
+      console.error("Failed to delete company:", error);
 
       if (error instanceof Error) {
         setError(error.message);
       } else {
         setError("Failed to delete company.");
       }
-
     } finally {
-
       setDeletingId(null);
-
     }
   }
-
 
   // ==========================================
   // LOADING
@@ -136,19 +112,14 @@ export default function AdminPage() {
   if (loading) {
     return (
       <main className="min-h-screen px-6 py-8">
-
         <div className="neo mx-auto max-w-7xl rounded-3xl p-10 text-center">
-
           <p className="text-lg opacity-70">
             Loading admin dashboard...
           </p>
-
         </div>
-
       </main>
     );
   }
-
 
   // ==========================================
   // PAGE
@@ -157,44 +128,32 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen px-6 py-8">
 
-    {/* Navbar */}
-  <nav className="neo mx-auto flex max-w-7xl items-center justify-between rounded-3xl px-8 py-5">
+      {/* Navbar */}
+      <nav className="neo mx-auto flex max-w-7xl items-center justify-between rounded-3xl px-8 py-5">
 
-    <Link
-      href="/"
-      className="text-2xl font-bold"
-    >
-      ComCon
-    </Link>
+        <Link
+          href="/"
+          className="text-2xl font-bold"
+        >
+          ComCon
+        </Link>
 
+        <div className="flex items-center gap-4">
 
-    <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.push("/")}
+            className="neo-button rounded-2xl px-5 py-3"
+          >
+            Home
+          </button>
 
-      {/* Home */}
-      <button
-        onClick={() => router.push("/")}
-        className="neo-button rounded-2xl px-5 py-3"
-      >
-        Home
-      </button>
+          <span className="rounded-2xl px-5 py-3 opacity-70">
+            Admin
+          </span>
 
-      {/* Admin */}
-      <span className="rounded-2xl px-5 py-3 opacity-70">
-        Admin
-      </span>
+        </div>
 
-      {/* Logout */}
-      <button
-        onClick={handleLogout}
-        className="neo-button rounded-2xl px-5 py-3"
-      >
-        Logout
-      </button>
-
-    </div>
-
-  </nav>
-
+      </nav>
 
       {/* Heading */}
       <section className="mx-auto mt-16 max-w-7xl">
@@ -209,14 +168,12 @@ export default function AdminPage() {
 
       </section>
 
-
       {/* Companies section */}
       <section className="mx-auto mt-14 max-w-7xl">
 
         <div className="mb-8 flex items-center justify-between">
 
           <div>
-
             <h3 className="text-3xl font-bold">
               Companies
             </h3>
@@ -224,15 +181,11 @@ export default function AdminPage() {
             <p className="mt-2 opacity-60">
               {companies.length} companies
             </p>
-
           </div>
-
 
           <button
             onClick={() =>
-              router.push(
-                "/admin/companies/create"
-              )
+              router.push("/admin/companies/create")
             }
             className="neo-button rounded-2xl px-6 py-3 font-semibold"
           >
@@ -241,18 +194,15 @@ export default function AdminPage() {
 
         </div>
 
-
         {/* Error */}
         {error && (
-          <div className="neo rounded-3xl p-6 text-center text-red-500">
+          <div className="neo mb-8 rounded-3xl p-6 text-center text-red-500">
             {error}
           </div>
         )}
 
-
         {/* Companies */}
         {!error && companies.length > 0 && (
-
           <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
 
             {companies.map((company) => (
@@ -266,29 +216,23 @@ export default function AdminPage() {
                 <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl neo-inset">
 
                   {company.logoUrl ? (
-
                     <img
                       src={company.logoUrl}
                       alt={`${company.name} logo`}
                       className="h-14 w-14 rounded-xl object-contain"
                     />
-
                   ) : (
-
                     <span className="text-2xl font-bold">
                       {company.name.charAt(0)}
                     </span>
-
                   )}
 
                 </div>
-
 
                 {/* Company name */}
                 <h4 className="text-xl font-bold">
                   {company.name}
                 </h4>
-
 
                 {/* Industry */}
                 {company.industry && (
@@ -297,7 +241,6 @@ export default function AdminPage() {
                   </p>
                 )}
 
-
                 {/* Headquarters */}
                 {company.headquarters && (
                   <p className="mt-1 opacity-60">
@@ -305,14 +248,12 @@ export default function AdminPage() {
                   </p>
                 )}
 
-
                 {/* Description */}
                 {company.description && (
                   <p className="mt-4 line-clamp-3 text-sm opacity-60">
                     {company.description}
                   </p>
                 )}
-
 
                 {/* Buttons */}
                 <div className="mt-7 flex gap-3">
@@ -324,11 +265,11 @@ export default function AdminPage() {
                         `/admin/companies/${company.id}/edit`
                       )
                     }
-                    className="neo-button flex-1 rounded-2xl px-4 py-3 font-semibold"
+                    disabled={deletingId === company.id}
+                    className="neo-button flex-1 rounded-2xl px-4 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Update
                   </button>
-
 
                   {/* DELETE */}
                   <button
@@ -338,9 +279,7 @@ export default function AdminPage() {
                         company.name
                       )
                     }
-                    disabled={
-                      deletingId === company.id
-                    }
+                    disabled={deletingId === company.id}
                     className="neo-button flex-1 rounded-2xl px-4 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {deletingId === company.id
@@ -355,13 +294,10 @@ export default function AdminPage() {
             ))}
 
           </div>
-
         )}
-
 
         {/* No companies */}
         {!error && companies.length === 0 && (
-
           <div className="neo rounded-3xl p-12 text-center">
 
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl neo-inset">
@@ -388,7 +324,6 @@ export default function AdminPage() {
             </button>
 
           </div>
-
         )}
 
       </section>

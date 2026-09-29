@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { getCompanies } from "@/services/companyApi";
 import type { Company } from "@/types/company";
 import CompanySearch from "@/components/CompanySearch";
+import Navbar from "@/components/NavBar";
 
 export default async function Home() {
   let companies: Company[] = [];
@@ -17,22 +17,7 @@ export default async function Home() {
     <main className="min-h-screen px-6 py-8">
 
       {/* Navbar */}
-      <nav className="neo mx-auto flex max-w-7xl items-center justify-between rounded-3xl px-8 py-5">
-
-        {/* Logo */}
-        <Link
-          href="/"
-          className="text-2xl font-bold"
-        >
-          ComCon
-        </Link>
-
-        {/* Profile */}
-        <div className="flex items-center">
-          <UserButton/>
-        </div>
-
-      </nav>
+      <Navbar/>
 
 
       {/* Hero */}

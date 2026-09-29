@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   getCompanyById,
   getCompanyLocations,
@@ -6,6 +7,21 @@ import {
   getCompanyFinancials,
   getCompanyPeople,
   getCompanySocialLinks,
+  getHiringEvents,
+  getJobRoles,
+  getRoleCompensation,
+  getRoleEligibility,
+  getEligibleBranches,
+  getSelectionRounds,
+  getJobLocations,
+  getRoleInternships,
+  getHiringDocuments,
+  getHiringTimeline,
+  getRoleVacancy,
+  getRoleSkills,
+  getRoleApplicationRequirements,
+  getRoleBond,
+  getDataSources,
 } from "@/services/companyApi";
 
 import type {
@@ -15,6 +31,21 @@ import type {
   CompanyFinancial,
   CompanyPerson,
   CompanySocialLink,
+  CampusHiringEvent,
+  JobRole,
+  Compensation,
+  EligibilityCriteria,
+  EligibleBranch,
+  SelectionRound,
+  JobLocation,
+  InternshipDetails,
+  HiringDocument,
+  HiringTimeline,
+  RoleVacancy,
+  RoleSkills,
+  RoleApplicationRequirement,
+  RoleBond,
+  DataSource,
 } from "@/types/company";
 
 interface CompanyDetailsPageProps {
@@ -36,6 +67,33 @@ export default async function CompanyDetailsPage({
   let financials: CompanyFinancial[] = [];
   let persons: CompanyPerson[] = [];
   let socialLinks: CompanySocialLink[] = [];
+  let hiringEvents: CampusHiringEvent[] = [];
+
+  const roleData = new Map<
+    number,
+    {
+      role: JobRole;
+      compensation: Compensation | null;
+      eligibility: EligibilityCriteria | null;
+      branches: EligibleBranch[];
+      selectionRounds: SelectionRound[];
+      locations: JobLocation[];
+      internships: InternshipDetails[];
+      vacancy: RoleVacancy | null;
+      skills: RoleSkills | null;
+      applicationRequirements: RoleApplicationRequirement | null;
+      bond: RoleBond | null;
+    }
+  >();
+
+  const eventData = new Map<
+    number,
+    {
+      documents: HiringDocument[];
+      timeline: HiringTimeline[];
+      sources: DataSource[];
+    }
+  >();
 
   try {
     company = await getCompanyById(companyId);
@@ -46,9 +104,181 @@ export default async function CompanyDetailsPage({
     persons = await getCompanyPeople(companyId);
     socialLinks = await getCompanySocialLinks(companyId);
 
+    hiringEvents = await getHiringEvents(companyId);
+
+    await Promise.all(
+      hiringEvents.map(async (event) => {
+        const [roles, documents, timeline, sources] =
+          await Promise.all([
+            getJobRoles(companyId, event.id),
+            getHiringDocuments(companyId, event.id),
+            getHiringTimeline(companyId, event.id),
+            getOptionalList(
+              () => getDataSources(companyId, event.id),
+            ),
+          ]);
+
+        eventData.set(event.id, {
+          documents,
+          timeline,
+          sources,
+        });
+
+        await Promise.all(
+          roles.map(async (role) => {
+            const [
+              compensation,
+              eligibility,
+              branches,
+              selectionRounds,
+              roleLocations,
+              internships,
+              vacancy,
+              skills,
+              applicationRequirements,
+              bond,
+            ] = await Promise.all([
+              getOptional(
+                () => getRoleCompensation(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptional(
+                () => getRoleEligibility(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptionalList(
+                () => getEligibleBranches(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptionalList(
+                () => getSelectionRounds(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptionalList(
+                () => getJobLocations(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptionalList(
+                () => getRoleInternships(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptional(
+                () => getRoleVacancy(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptional(
+                () => getRoleSkills(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptional(
+                () => getRoleApplicationRequirements(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+              getOptional(
+                () => getRoleBond(
+                  companyId,
+                  event.id,
+                  role.id
+                )
+              ),
+            ]);
+
+            roleData.set(role.id, {
+              role,
+              compensation,
+              eligibility,
+              branches,
+              selectionRounds,
+              locations: roleLocations,
+              internships,
+              vacancy,
+              skills,
+              applicationRequirements,
+              bond,
+            });
+          })
+        );
+      })
+    );
+
   } catch (error) {
     console.error("Failed to load company details:", error);
   }
+
+  const hiringChartData = hiringEvents
+    .map((event) => ({
+      year: event.academicYear,
+      vacancies: event.totalVacancies ?? 0,
+      selected: event.totalSelected ?? 0,
+    }))
+    .sort((a, b) => a.year.localeCompare(b.year));
+
+  const financialChartData = financials
+    .filter(
+      (financial) =>
+        financial.revenue !== null ||
+        financial.profit !== null
+    )
+    .sort((a, b) =>
+      a.financialYear.localeCompare(b.financialYear)
+    );
+
+  const roleCompensationChartData = hiringEvents
+    .flatMap((event) => {
+      const eventRoles = Array.from(roleData.values()).filter(
+        (item) => item.role.hiringEvent?.id === event.id
+      );
+
+      return eventRoles
+        .filter((item) => item.compensation?.ctc !== null && item.compensation?.ctc !== undefined)
+        .map((item) => ({
+          role:
+            item.role.roleName.length > 24
+              ? `${item.role.roleName.slice(0, 24)}…`
+              : item.role.roleName,
+          ctc: item.compensation?.ctc ?? 0,
+          year: event.academicYear,
+          currency: item.compensation?.currency || "",
+        }));
+    });
+
+  const ownershipChartData = ownership
+    .filter(
+      (owner) =>
+        owner.ownershipPercentage !== null &&
+        owner.ownershipPercentage !== undefined
+    )
+    .map((owner) => ({
+      name: owner.ownerName,
+      value: owner.ownershipPercentage ?? 0,
+    }));
 
   if (!company) {
     return (
@@ -288,6 +518,1026 @@ export default async function CompanyDetailsPage({
         </div>
 
       </section>
+
+
+      {/* Campus Hiring */}
+      <section className="mx-auto mt-12 max-w-7xl">
+
+        <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+
+          <div>
+            <h3 className="text-3xl font-bold">
+              Campus Hiring
+            </h3>
+
+            <p className="mt-2 opacity-60">
+              Objective hiring information by academic year and role.
+            </p>
+          </div>
+
+          {hiringEvents.length > 0 && (
+            <span className="neo-inset rounded-2xl px-4 py-2 text-sm font-semibold">
+              {hiringEvents.length} hiring event
+              {hiringEvents.length === 1 ? "" : "s"}
+            </span>
+          )}
+
+        </div>
+
+        {hiringEvents.length > 0 ? (
+
+          <div className="space-y-10">
+
+            {hiringEvents.map((event) => {
+
+              const eventInfo =
+                eventData.get(event.id);
+
+              const eventRoles =
+                Array.from(roleData.values())
+                  .filter(
+                    (item) =>
+                      item.role.hiringEvent?.id === event.id
+                  );
+
+              return (
+                <div
+                  key={event.id}
+                  className="neo rounded-3xl p-8"
+                >
+
+                  {/* Event header */}
+                  <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+
+                    <div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+
+                        <h4 className="text-2xl font-bold">
+                          {event.driveName ||
+                            `Campus Hiring ${event.academicYear}`}
+                        </h4>
+
+                        <span className="neo-inset rounded-xl px-3 py-1 text-sm font-semibold">
+                          {event.academicYear}
+                        </span>
+
+                        {event.status && (
+                          <span className="rounded-xl border px-3 py-1 text-sm">
+                            {event.status}
+                          </span>
+                        )}
+
+                      </div>
+
+                      <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+
+                        <HiringMeta
+                          label="Drive Type"
+                          value={event.driveType}
+                        />
+
+                        <HiringMeta
+                          label="Recruitment Type"
+                          value={event.recruitmentType}
+                        />
+
+                        <HiringMeta
+                          label="Campus"
+                          value={event.campusLocation}
+                        />
+
+                        <HiringMeta
+                          label="Vacancies"
+                          value={
+                            event.totalVacancies !== null &&
+                            event.totalVacancies !== undefined
+                              ? String(event.totalVacancies)
+                              : null
+                          }
+                        />
+
+                        <HiringMeta
+                          label="Selected"
+                          value={
+                            event.totalSelected !== null &&
+                            event.totalSelected !== undefined
+                              ? String(event.totalSelected)
+                              : null
+                          }
+                        />
+
+                        <HiringMeta
+                          label="Application"
+                          value={event.applicationMethod}
+                        />
+
+                      </div>
+
+                    </div>
+
+                    <div className="neo-inset rounded-2xl p-5 text-sm lg:min-w-56">
+
+                      <p className="font-semibold">
+                        Hiring Dates
+                      </p>
+
+                      <div className="mt-3 space-y-2 opacity-70">
+
+                        <HiringDate
+                          label="Registration"
+                          value={formatDateRange(
+                            event.registrationStart,
+                            event.registrationEnd
+                          )}
+                        />
+
+                        <HiringDate
+                          label="Drive"
+                          value={formatDate(event.driveDate)}
+                        />
+
+                        <HiringDate
+                          label="Result"
+                          value={formatDate(event.resultDate)}
+                        />
+
+                        <HiringDate
+                          label="Joining"
+                          value={formatDate(event.joiningDate)}
+                        />
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                  {event.notes && (
+                    <div className="mt-6 rounded-2xl border p-5">
+
+                      <p className="text-sm font-semibold">
+                        Notes
+                      </p>
+
+                      <p className="mt-2 leading-6 opacity-70">
+                        {event.notes}
+                      </p>
+
+                    </div>
+                  )}
+
+                  {/* Roles */}
+                  <div className="mt-8">
+
+                    <div className="mb-5 flex items-center justify-between">
+
+                      <h5 className="text-xl font-bold">
+                        Roles
+                      </h5>
+
+                      <span className="text-sm opacity-50">
+                        {eventRoles.length} role
+                        {eventRoles.length === 1 ? "" : "s"}
+                      </span>
+
+                    </div>
+
+                    {eventRoles.length > 0 ? (
+
+                      <div className="grid gap-6 lg:grid-cols-2">
+
+                        {eventRoles.map((item) => {
+
+                          const role =
+                            item.role;
+
+                          const compensation =
+                            item.compensation;
+
+                          const eligibility =
+                            item.eligibility;
+
+                          const vacancy =
+                            item.vacancy;
+
+                          return (
+                            <div
+                              key={role.id}
+                              className="neo-inset rounded-3xl p-6"
+                            >
+
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                                <div>
+
+                                  <h6 className="text-xl font-bold">
+                                    {role.roleName}
+                                  </h6>
+
+                                  {role.department && (
+                                    <p className="mt-1 opacity-60">
+                                      {role.department}
+                                    </p>
+                                  )}
+
+                                </div>
+
+                                {role.employmentType && (
+                                  <span className="rounded-xl border px-3 py-1 text-sm">
+                                    {role.employmentType}
+                                  </span>
+                                )}
+
+                              </div>
+
+                              {role.description && (
+                                <p className="mt-4 leading-6 opacity-70">
+                                  {role.description}
+                                </p>
+                              )}
+
+                              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+
+                                <RoleSummaryItem
+                                  label="Work Mode"
+                                  value={role.workMode}
+                                />
+
+                                <RoleSummaryItem
+                                  label="Location Count"
+                                  value={
+                                    String(item.locations.length)
+                                  }
+                                />
+
+                                <RoleSummaryItem
+                                  label="Vacancies"
+                                  value={
+                                    vacancy?.vacancyCount !== null &&
+                                    vacancy?.vacancyCount !== undefined
+                                      ? String(vacancy.vacancyCount)
+                                      : null
+                                  }
+                                />
+
+                                <RoleSummaryItem
+                                  label="Selected"
+                                  value={
+                                    vacancy?.selectedCount !== null &&
+                                    vacancy?.selectedCount !== undefined
+                                      ? String(vacancy.selectedCount)
+                                      : null
+                                  }
+                                />
+
+                              </div>
+
+                              {/* Compensation */}
+                              {compensation && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Compensation
+                                  </p>
+
+                                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+
+                                    <RoleSummaryItem
+                                      label="CTC"
+                                      value={formatMoney(
+                                        compensation.ctc,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Fixed Pay"
+                                      value={formatMoney(
+                                        compensation.fixedPay,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Variable Pay"
+                                      value={formatMoney(
+                                        compensation.variablePay,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Joining Bonus"
+                                      value={formatMoney(
+                                        compensation.joiningBonus,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Retention Bonus"
+                                      value={formatMoney(
+                                        compensation.retentionBonus,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Internship Stipend"
+                                      value={formatMoney(
+                                        compensation.internshipStipend,
+                                        compensation.currency
+                                      )}
+                                    />
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Eligibility */}
+                              {eligibility && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Eligibility
+                                  </p>
+
+                                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+
+                                    <RoleSummaryItem
+                                      label="Minimum CGPA"
+                                      value={
+                                        eligibility.minimumCgpa !== null &&
+                                        eligibility.minimumCgpa !== undefined
+                                          ? String(eligibility.minimumCgpa)
+                                          : null
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Minimum Percentage"
+                                      value={
+                                        eligibility.minimumPercentage !== null &&
+                                        eligibility.minimumPercentage !== undefined
+                                          ? String(eligibility.minimumPercentage)
+                                          : null
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Maximum Backlogs"
+                                      value={
+                                        eligibility.maximumBacklogs !== null &&
+                                        eligibility.maximumBacklogs !== undefined
+                                          ? String(eligibility.maximumBacklogs)
+                                          : null
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Active Backlogs"
+                                      value={
+                                        eligibility.activeBacklogsAllowed === null ||
+                                        eligibility.activeBacklogsAllowed === undefined
+                                          ? null
+                                          : eligibility.activeBacklogsAllowed
+                                            ? "Allowed"
+                                            : "Not allowed"
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Graduation From"
+                                      value={
+                                        eligibility.graduationYearFrom !== null &&
+                                        eligibility.graduationYearFrom !== undefined
+                                          ? String(eligibility.graduationYearFrom)
+                                          : null
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Graduation To"
+                                      value={
+                                        eligibility.graduationYearTo !== null &&
+                                        eligibility.graduationYearTo !== undefined
+                                          ? String(eligibility.graduationYearTo)
+                                          : null
+                                      }
+                                    />
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Eligible branches */}
+                              {item.branches.length > 0 && (
+                                <div className="mt-6">
+
+                                  <p className="text-sm font-semibold">
+                                    Eligible Branches
+                                  </p>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+
+                                    {item.branches.map((branch) => (
+                                      <span
+                                        key={branch.id}
+                                        className="rounded-xl border px-3 py-2 text-sm"
+                                      >
+                                        {branch.branchName}
+                                        {branch.branchCode
+                                          ? ` (${branch.branchCode})`
+                                          : ""}
+                                      </span>
+                                    ))}
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Skills */}
+                              {item.skills && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Skills & Requirements
+                                  </p>
+
+                                  <div className="mt-4 space-y-3">
+
+                                    <TextListItem
+                                      label="Technical Skills"
+                                      value={item.skills.technicalSkills}
+                                    />
+
+                                    <TextListItem
+                                      label="Programming Languages"
+                                      value={item.skills.programmingLanguages}
+                                    />
+
+                                    <TextListItem
+                                      label="Frameworks"
+                                      value={item.skills.frameworks}
+                                    />
+
+                                    <TextListItem
+                                      label="Tools"
+                                      value={item.skills.tools}
+                                    />
+
+                                    <TextListItem
+                                      label="Databases"
+                                      value={item.skills.databases}
+                                    />
+
+                                    <TextListItem
+                                      label="Soft Skills"
+                                      value={item.skills.softSkills}
+                                    />
+
+                                    <TextListItem
+                                      label="Other Requirements"
+                                      value={item.skills.otherRequirements}
+                                    />
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Selection rounds */}
+                              {item.selectionRounds.length > 0 && (
+                                <div className="mt-6">
+
+                                  <p className="font-semibold">
+                                    Selection Process
+                                  </p>
+
+                                  <div className="mt-4 space-y-3">
+
+                                    {item.selectionRounds.map((round) => (
+                                      <div
+                                        key={round.id}
+                                        className="rounded-2xl border p-4"
+                                      >
+
+                                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+                                          <p className="font-semibold">
+                                            {round.roundNumber}.
+                                            {" "}
+                                            {round.roundName}
+                                          </p>
+
+                                          {round.roundType && (
+                                            <span className="text-sm opacity-50">
+                                              {round.roundType}
+                                            </span>
+                                          )}
+
+                                        </div>
+
+                                        {round.description && (
+                                          <p className="mt-2 text-sm leading-6 opacity-70">
+                                            {round.description}
+                                          </p>
+                                        )}
+
+                                      </div>
+                                    ))}
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Locations */}
+                              {item.locations.length > 0 && (
+                                <div className="mt-6">
+
+                                  <p className="font-semibold">
+                                    Job Locations
+                                  </p>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+
+                                    {item.locations.map((location) => (
+                                      <span
+                                        key={location.id}
+                                        className="rounded-xl border px-3 py-2 text-sm"
+                                      >
+                                        {location.locationName}
+                                      </span>
+                                    ))}
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Internship */}
+                              {item.internships.length > 0 && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Internship
+                                  </p>
+
+                                  <div className="mt-4 space-y-3">
+
+                                    {item.internships.map((internship) => (
+                                      <div
+                                        key={internship.id}
+                                        className="text-sm"
+                                      >
+
+                                        <p className="font-semibold">
+                                          Internship {internship.internshipNumber}
+                                        </p>
+
+                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+
+                                          <RoleSummaryItem
+                                            label="Required"
+                                            value={
+                                              internship.internshipRequired === null ||
+                                              internship.internshipRequired === undefined
+                                                ? null
+                                                : internship.internshipRequired
+                                                  ? "Yes"
+                                                  : "No"
+                                            }
+                                          />
+
+                                          <RoleSummaryItem
+                                            label="Duration"
+                                            value={
+                                              internship.durationMonths !== null &&
+                                              internship.durationMonths !== undefined
+                                                ? `${internship.durationMonths} months`
+                                                : null
+                                            }
+                                          />
+
+                                          <RoleSummaryItem
+                                            label="Stipend"
+                                            value={formatMoney(
+                                              internship.stipend,
+                                              internship.stipendPeriod
+                                            )}
+                                          />
+
+                                          <RoleSummaryItem
+                                            label="PPO"
+                                            value={
+                                              internship.ppoOffered === null ||
+                                              internship.ppoOffered === undefined
+                                                ? null
+                                                : internship.ppoOffered
+                                                  ? "Offered"
+                                                  : "Not offered"
+                                            }
+                                          />
+
+                                        </div>
+
+                                      </div>
+                                    ))}
+
+                                  </div>
+
+                                </div>
+                              )}
+
+                              {/* Bond */}
+                              {item.bond && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Bond
+                                  </p>
+
+                                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+
+                                    <RoleSummaryItem
+                                      label="Required"
+                                      value={
+                                        item.bond.bondRequired === null ||
+                                        item.bond.bondRequired === undefined
+                                          ? null
+                                          : item.bond.bondRequired
+                                            ? "Yes"
+                                            : "No"
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Duration"
+                                      value={
+                                        item.bond.bondDurationMonths !== null &&
+                                        item.bond.bondDurationMonths !== undefined
+                                          ? `${item.bond.bondDurationMonths} months`
+                                          : null
+                                      }
+                                    />
+
+                                    <RoleSummaryItem
+                                      label="Amount"
+                                      value={formatMoney(
+                                        item.bond.bondAmount,
+                                        compensation?.currency || null
+                                      )}
+                                    />
+
+                                  </div>
+
+                                  {item.bond.bondDetails && (
+                                    <p className="mt-4 text-sm leading-6 opacity-70">
+                                      {item.bond.bondDetails}
+                                    </p>
+                                  )}
+
+                                </div>
+                              )}
+
+                              {/* Application requirements */}
+                              {item.applicationRequirements && (
+                                <div className="mt-6 rounded-2xl border p-5">
+
+                                  <p className="font-semibold">
+                                    Application Requirements
+                                  </p>
+
+                                  <div className="mt-4 flex flex-wrap gap-2">
+
+                                    {item.applicationRequirements.resumeRequired && (
+                                      <RequirementTag text="Resume" />
+                                    )}
+
+                                    {item.applicationRequirements.coverLetterRequired && (
+                                      <RequirementTag text="Cover Letter" />
+                                    )}
+
+                                    {item.applicationRequirements.portfolioRequired && (
+                                      <RequirementTag text="Portfolio" />
+                                    )}
+
+                                    {item.applicationRequirements.certificatesRequired && (
+                                      <RequirementTag text="Certificates" />
+                                    )}
+
+                                    {item.applicationRequirements.transcriptRequired && (
+                                      <RequirementTag text="Transcript" />
+                                    )}
+
+                                    {item.applicationRequirements.photoRequired && (
+                                      <RequirementTag text="Photo" />
+                                    )}
+
+                                  </div>
+
+                                  {item.applicationRequirements.applicationInstructions && (
+                                    <p className="mt-4 text-sm leading-6 opacity-70">
+                                      {item.applicationRequirements.applicationInstructions}
+                                    </p>
+                                  )}
+
+                                </div>
+                              )}
+
+                              {role.responsibilities && (
+                                <div className="mt-6">
+
+                                  <p className="text-sm font-semibold">
+                                    Responsibilities
+                                  </p>
+
+                                  <p className="mt-2 text-sm leading-6 opacity-70">
+                                    {role.responsibilities}
+                                  </p>
+
+                                </div>
+                              )}
+
+                            </div>
+                          );
+                        })}
+
+                      </div>
+
+                    ) : (
+
+                      <div className="rounded-2xl border p-6 text-center">
+                        <p className="opacity-60">
+                          No role information available for this hiring event.
+                        </p>
+                      </div>
+
+                    )}
+
+                  </div>
+
+                  {/* Event timeline */}
+                  {eventInfo && eventInfo.timeline.length > 0 && (
+                    <div className="mt-8">
+
+                      <h5 className="text-xl font-bold">
+                        Hiring Timeline
+                      </h5>
+
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+
+                        {eventInfo.timeline.map((stage) => (
+                          <div
+                            key={stage.id}
+                            className="rounded-2xl border p-5"
+                          >
+
+                            <div className="flex items-start justify-between gap-4">
+
+                              <div>
+
+                                <p className="font-semibold">
+                                  {stage.sequenceNumber}.
+                                  {" "}
+                                  {stage.stageName}
+                                </p>
+
+                                {stage.stageType && (
+                                  <p className="mt-1 text-sm opacity-50">
+                                    {stage.stageType}
+                                  </p>
+                                )}
+
+                              </div>
+
+                              {stage.status && (
+                                <span className="text-sm font-semibold">
+                                  {stage.status}
+                                </span>
+                              )}
+
+                            </div>
+
+                            <p className="mt-3 text-sm opacity-60">
+                              {formatDate(stage.stageDate)}
+                            </p>
+
+                            {stage.description && (
+                              <p className="mt-3 text-sm leading-6 opacity-70">
+                                {stage.description}
+                              </p>
+                            )}
+
+                          </div>
+                        ))}
+
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* Documents and sources */}
+                  {eventInfo &&
+                    (eventInfo.documents.length > 0 ||
+                      eventInfo.sources.length > 0) && (
+                      <div className="mt-8 grid gap-6 md:grid-cols-2">
+
+                        {eventInfo.documents.length > 0 && (
+                          <div className="rounded-2xl border p-5">
+
+                            <h5 className="font-semibold">
+                              Hiring Documents
+                            </h5>
+
+                            <div className="mt-4 space-y-3">
+
+                              {eventInfo.documents.map((document) => (
+                                <div key={document.id}>
+
+                                  {document.documentUrl ? (
+                                    <a
+                                      href={document.documentUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-semibold underline"
+                                    >
+                                      {document.documentName}
+                                    </a>
+                                  ) : (
+                                    <p className="font-semibold">
+                                      {document.documentName}
+                                    </p>
+                                  )}
+
+                                  {document.documentType && (
+                                    <p className="mt-1 text-sm opacity-50">
+                                      {document.documentType}
+                                    </p>
+                                  )}
+
+                                </div>
+                              ))}
+
+                            </div>
+
+                          </div>
+                        )}
+
+                        {eventInfo.sources.length > 0 && (
+                          <div className="rounded-2xl border p-5">
+
+                            <h5 className="font-semibold">
+                              Data Sources
+                            </h5>
+
+                            <div className="mt-4 space-y-3">
+
+                              {eventInfo.sources.map((source) => (
+                                <div key={source.id}>
+
+                                  {source.sourceUrl ? (
+                                    <a
+                                      href={source.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-semibold underline"
+                                    >
+                                      {source.sourceName}
+                                    </a>
+                                  ) : (
+                                    <p className="font-semibold">
+                                      {source.sourceName}
+                                    </p>
+                                  )}
+
+                                  <div className="mt-1 flex flex-wrap gap-2 text-sm opacity-50">
+
+                                    {source.sourceType && (
+                                      <span>
+                                        {source.sourceType}
+                                      </span>
+                                    )}
+
+                                    {source.official && (
+                                      <span>
+                                        Official
+                                      </span>
+                                    )}
+
+                                    {source.verified && (
+                                      <span>
+                                        Verified
+                                      </span>
+                                    )}
+
+                                  </div>
+
+                                </div>
+                              ))}
+
+                            </div>
+
+                          </div>
+                        )}
+
+                      </div>
+                    )}
+
+                  {event.officialNotificationUrl && (
+                    <div className="mt-6">
+
+                      <a
+                        href={event.officialNotificationUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="neo-button inline-block rounded-2xl px-5 py-3 font-semibold"
+                      >
+                        Official Hiring Notification
+                      </a>
+
+                    </div>
+                  )}
+
+                </div>
+              );
+            })}
+
+          </div>
+
+        ) : (
+
+          <EmptySection text="No campus hiring information available." />
+
+        )}
+
+      </section>
+
+
+      {/* Data Visualizations */}
+      {(hiringChartData.length > 0 ||
+        financialChartData.length > 0 ||
+        roleCompensationChartData.length > 0 ||
+        ownershipChartData.length > 0) && (
+        <section className="mx-auto mt-12 max-w-7xl">
+
+          <div className="mb-6">
+            <h3 className="text-3xl font-bold">
+              Data Overview
+            </h3>
+
+            <p className="mt-2 opacity-60">
+              Visual summary of the objective company and campus hiring data.
+            </p>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-2">
+
+            {hiringChartData.length > 0 && (
+              <ChartCard
+                title="Campus Hiring Volume"
+                description="Vacancies and selected candidates reported for each academic year."
+              >
+                <HiringVolumeChart data={hiringChartData} />
+              </ChartCard>
+            )}
+
+            {financialChartData.length > 0 && (
+              <ChartCard
+                title="Financial Trend"
+                description="Revenue and profit across the available financial years."
+              >
+                <FinancialTrendChart data={financialChartData} />
+              </ChartCard>
+            )}
+
+            {roleCompensationChartData.length > 0 && (
+              <ChartCard
+                title="CTC by Campus Role"
+                description="Reported CTC for roles where compensation data is available."
+              >
+                <RoleCompensationChart data={roleCompensationChartData} />
+              </ChartCard>
+            )}
+
+            {ownershipChartData.length > 0 && (
+              <ChartCard
+                title="Ownership Mix"
+                description="Reported ownership percentages for the company."
+              >
+                <OwnershipPieChart data={ownershipChartData} />
+              </ChartCard>
+            )}
+
+          </div>
+
+        </section>
+      )}
 
 
       {/* Locations */}
@@ -569,6 +1819,661 @@ export default async function CompanyDetailsPage({
 /* -------------------------------- */
 /* Reusable Components               */
 /* -------------------------------- */
+
+function ChartCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="neo rounded-3xl p-7">
+
+      <h4 className="text-xl font-bold">
+        {title}
+      </h4>
+
+      <p className="mt-2 text-sm opacity-60">
+        {description}
+      </p>
+
+      <div className="mt-6">
+        {children}
+      </div>
+
+    </div>
+  );
+}
+
+
+function HiringVolumeChart({
+  data,
+}: {
+  data: {
+    year: string;
+    vacancies: number;
+    selected: number;
+  }[];
+}) {
+  const maxValue = Math.max(
+    1,
+    ...data.flatMap((item) => [
+      item.vacancies,
+      item.selected,
+    ])
+  );
+
+  return (
+    <div className="space-y-5">
+
+      {data.map((item) => (
+        <div key={item.year}>
+
+          <div className="mb-2 flex items-center justify-between text-sm">
+
+            <span className="font-semibold">
+              {item.year}
+            </span>
+
+            <span className="opacity-60">
+              {item.selected} selected / {item.vacancies} vacancies
+            </span>
+
+          </div>
+
+          <div className="space-y-2">
+
+            <ChartBar
+              label="Vacancies"
+              value={item.vacancies}
+              maxValue={maxValue}
+            />
+
+            <ChartBar
+              label="Selected"
+              value={item.selected}
+              maxValue={maxValue}
+            />
+
+          </div>
+
+        </div>
+      ))}
+
+      <ChartLegend
+        items={[
+          "Vacancies",
+          "Selected",
+        ]}
+      />
+
+    </div>
+  );
+}
+
+
+function FinancialTrendChart({
+  data,
+}: {
+  data: CompanyFinancial[];
+}) {
+  const width = 620;
+  const height = 260;
+  const padding = 42;
+
+  const values = data.flatMap((item) => [
+    item.revenue ?? 0,
+    item.profit ?? 0,
+  ]);
+
+  const maxValue = Math.max(1, ...values);
+
+  const getX = (index: number) =>
+    data.length === 1
+      ? width / 2
+      : padding +
+        (index * (width - padding * 2)) /
+          (data.length - 1);
+
+  const getY = (value: number) =>
+    height -
+    padding -
+    (value / maxValue) *
+      (height - padding * 2);
+
+  const revenuePoints = data
+    .map(
+      (item, index) =>
+        `${getX(index)},${getY(item.revenue ?? 0)}`
+    )
+    .join(" ");
+
+  const profitPoints = data
+    .map(
+      (item, index) =>
+        `${getX(index)},${getY(item.profit ?? 0)}`
+    )
+    .join(" ");
+
+  return (
+    <div className="overflow-x-auto">
+
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-auto min-w-[560px] w-full"
+        role="img"
+        aria-label="Financial trend chart"
+      >
+
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const y =
+            height -
+            padding -
+            ratio * (height - padding * 2);
+
+          return (
+            <line
+              key={ratio}
+              x1={padding}
+              x2={width - padding}
+              y1={y}
+              y2={y}
+              stroke="currentColor"
+              strokeOpacity="0.12"
+            />
+          );
+        })}
+
+        <polyline
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={revenuePoints}
+        />
+
+        <polyline
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeDasharray="8 8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={profitPoints}
+        />
+
+        {data.map((item, index) => (
+          <g key={item.id}>
+
+            <circle
+              cx={getX(index)}
+              cy={getY(item.revenue ?? 0)}
+              r="5"
+              fill="currentColor"
+            />
+
+            <circle
+              cx={getX(index)}
+              cy={getY(item.profit ?? 0)}
+              r="5"
+              fill="currentColor"
+              fillOpacity="0.45"
+            />
+
+            <text
+              x={getX(index)}
+              y={height - 12}
+              textAnchor="middle"
+              fontSize="12"
+              fill="currentColor"
+              opacity="0.6"
+            >
+              {item.financialYear}
+            </text>
+
+          </g>
+        ))}
+
+      </svg>
+
+      <ChartLegend
+        items={[
+          "Revenue",
+          "Profit",
+        ]}
+      />
+
+    </div>
+  );
+}
+
+
+function RoleCompensationChart({
+  data,
+}: {
+  data: {
+    role: string;
+    ctc: number;
+    year: string;
+    currency: string;
+  }[];
+}) {
+  const maxValue = Math.max(
+    1,
+    ...data.map((item) => item.ctc)
+  );
+
+  return (
+    <div className="space-y-4">
+
+      {data.map((item) => (
+        <div key={`${item.year}-${item.role}`}>
+
+          <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+
+            <span className="font-semibold">
+              {item.role}
+            </span>
+
+            <span className="shrink-0 opacity-60">
+              {formatMoney(item.ctc, item.currency)}
+            </span>
+
+          </div>
+
+          <div className="h-4 overflow-hidden rounded-full bg-current/10">
+
+            <div
+              className="h-full rounded-full bg-current"
+              style={{
+                width: `${Math.max(
+                  2,
+                  (item.ctc / maxValue) * 100
+                )}%`,
+              }}
+            />
+
+          </div>
+
+          <p className="mt-1 text-xs opacity-40">
+            {item.year}
+          </p>
+
+        </div>
+      ))}
+
+    </div>
+  );
+}
+
+
+function OwnershipPieChart({
+  data,
+}: {
+  data: {
+    name: string;
+    value: number;
+  }[];
+}) {
+  const total = data.reduce(
+    (sum, item) => sum + item.value,
+    0
+  );
+
+  const radius = 82;
+  const center = 100;
+  const circumference =
+    2 * Math.PI * radius;
+
+  let offset = 0;
+
+  return (
+    <div className="flex flex-col items-center gap-7 md:flex-row">
+
+      <div className="shrink-0">
+
+        <svg
+          viewBox="0 0 200 200"
+          className="h-52 w-52"
+          role="img"
+          aria-label="Ownership mix pie chart"
+        >
+
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeOpacity="0.08"
+            strokeWidth="32"
+          />
+
+          {data.map((item) => {
+
+            const percentage =
+              total > 0
+                ? item.value / total
+                : 0;
+
+            const dash =
+              percentage * circumference;
+
+            const currentOffset =
+              offset;
+
+            offset += dash;
+
+            return (
+              <circle
+                key={item.name}
+                cx={center}
+                cy={center}
+                r={radius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="32"
+                strokeDasharray={`${dash} ${circumference - dash}`}
+                strokeDashoffset={-currentOffset}
+                transform={`rotate(-90 ${center} ${center})`}
+                strokeLinecap="butt"
+              />
+            );
+          })}
+
+          <circle
+            cx={center}
+            cy={center}
+            r="54"
+            fill="currentColor"
+            fillOpacity="0.04"
+          />
+
+          <text
+            x="100"
+            y="96"
+            textAnchor="middle"
+            fontSize="18"
+            fontWeight="700"
+            fill="currentColor"
+          >
+            {data.length}
+          </text>
+
+          <text
+            x="100"
+            y="116"
+            textAnchor="middle"
+            fontSize="11"
+            fill="currentColor"
+            opacity="0.6"
+          >
+            owners
+          </text>
+
+        </svg>
+
+      </div>
+
+      <div className="w-full space-y-3">
+
+        {data.map((item) => (
+          <div
+            key={item.name}
+            className="flex items-center justify-between gap-4"
+          >
+
+            <span className="text-sm font-semibold">
+              {item.name}
+            </span>
+
+            <span className="text-sm opacity-60">
+              {item.value}%
+            </span>
+
+          </div>
+        ))}
+
+      </div>
+
+    </div>
+  );
+}
+
+
+function ChartBar({
+  label,
+  value,
+  maxValue,
+}: {
+  label: string;
+  value: number;
+  maxValue: number;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+
+      <span className="w-20 shrink-0 text-xs opacity-50">
+        {label}
+      </span>
+
+      <div className="h-3 flex-1 overflow-hidden rounded-full bg-current/10">
+
+        <div
+          className="h-full rounded-full bg-current"
+          style={{
+            width: `${Math.max(
+              value > 0 ? 2 : 0,
+              (value / maxValue) * 100
+            )}%`,
+          }}
+        />
+
+      </div>
+
+      <span className="w-16 text-right text-xs font-semibold">
+        {value.toLocaleString()}
+      </span>
+
+    </div>
+  );
+}
+
+
+function ChartLegend({
+  items,
+}: {
+  items: string[];
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-4 text-xs opacity-60">
+
+      {items.map((item, index) => (
+        <span
+          key={item}
+          className="flex items-center gap-2"
+        >
+
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${
+              index === 0
+                ? "bg-current"
+                : "border-2 border-current opacity-50"
+            }`}
+          />
+
+          {item}
+
+        </span>
+      ))}
+
+    </div>
+  );
+}
+
+
+async function getOptional<T>(
+  request: () => Promise<T>
+): Promise<T | null> {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+
+
+async function getOptionalList<T>(
+  request: () => Promise<T[]>
+): Promise<T[]> {
+  try {
+    return await request();
+  } catch {
+    return [];
+  }
+}
+
+
+function formatDate(
+  value: string | null | undefined
+): string {
+  if (!value) {
+    return "Not available";
+  }
+
+  return new Date(value).toLocaleDateString();
+}
+
+
+function formatDateRange(
+  start: string | null | undefined,
+  end: string | null | undefined
+): string {
+  if (!start && !end) {
+    return "Not available";
+  }
+
+  if (start && end) {
+    return `${formatDate(start)} - ${formatDate(end)}`;
+  }
+
+  return formatDate(start || end);
+}
+
+
+function formatMoney(
+  value: number | null | undefined,
+  currency: string | null | undefined
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return `${currency || ""} ${value.toLocaleString()}`.trim();
+}
+
+
+function HiringMeta({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide opacity-40">
+        {label}
+      </p>
+
+      <p className="mt-1 font-semibold">
+        {value || "Not available"}
+      </p>
+    </div>
+  );
+}
+
+
+function HiringDate({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex justify-between gap-4">
+      <span>{label}</span>
+      <span className="text-right font-semibold">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+
+function RoleSummaryItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide opacity-40">
+        {label}
+      </p>
+
+      <p className="mt-1 font-semibold">
+        {value || "Not available"}
+      </p>
+    </div>
+  );
+}
+
+
+function TextListItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <div>
+      <p className="text-sm font-semibold">
+        {label}
+      </p>
+
+      <p className="mt-1 text-sm leading-6 opacity-70">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+
+function RequirementTag({
+  text,
+}: {
+  text: string;
+}) {
+  return (
+    <span className="rounded-xl border px-3 py-2 text-sm">
+      {text}
+    </span>
+  );
+}
+
 
 function DetailItem({
   label,
